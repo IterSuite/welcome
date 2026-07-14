@@ -45,6 +45,38 @@ function Read-Secret($prompt) {
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
 }
 
+# This script is STATELESS on purpose — we refuse to write a token to disk, so there is nothing to
+# resume from. But stateless is not the same as oblivious: instead of REMEMBERING what is done, it
+# MEASURES it. Try the pull first; if it already works, the whole credential dance is skipped. Returns
+# 'ok' | 'denied' | 'transport' so the caller can tell "you lack access" from "your network dropped".
+function Try-Pull {
+    $log = [IO.Path]::GetTempFileName()
+    for ($i = 1; $i -le 3; $i++) {
+        docker pull $IMAGE 2>&1 | Tee-Object -FilePath $log
+        if ($LASTEXITCODE -eq 0) { return 'ok' }
+        if ((Get-Content $log -Raw) -imatch 'unauthorized|denied|forbidden') { return 'denied' }
+        if ($i -lt 3) { Say ""; Say "  transport error — retrying ($i/3)…"; Start-Sleep 3 }
+    }
+    return 'transport'
+}
+
+function Show-TransportHelp {
+    Bad "The download failed — and NOT because of permissions."
+    Say ""
+    Say "    You were authorised. The connection dropped mid-layer ('EOF', 'failed to copy')."
+    Say "    Layers do not come from ghcr.io — they come from pkg-containers.githubusercontent.com,"
+    Say "    a DIFFERENT host, and it routes badly from some regions."
+    Say ""
+    Say "    We measured this from Brazil: it fails. Over a VPN to Europe, the identical pull works."
+    Say "    Same machine, same token, same image — only the route changed."
+    Say ""
+    Say "    Prove it in one minute (the first is PUBLIC — no credential at all):"
+    Say "      docker pull ghcr.io/astral-sh/uv:latest"
+    Say "      docker pull python:3.11-slim"
+    Say "    First fails + second works  →  it is the route. TRY A VPN. Ask for no permissions;"
+    Say "                                   you already have the ones you need."
+}
+
 Say ""
 Say "Iter Suite — host setup"
 Say "Two keys, two doors. This installs nothing."
@@ -68,64 +100,45 @@ Say  "    and would prove nothing about whether YOUR account can reach anything.
 Say  "    the wrong identity is worse than a red."
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  KEY 1 — the image
+#  KEY 1 — the image  (probe first; only acquire a credential if the pull needs one)
 # ═══════════════════════════════════════════════════════════════════════════════
 Step "KEY 1 of 2 — the devbox image (read:packages)"
-Say "  Opening GitHub. The scope is ALREADY selected: read:packages, and nothing else."
-Say "  Generate it, copy it, come back."
-Say ""
-Start-Process $PKG_URL
-
-$pkgToken = Read-Secret "Paste the token (hidden)"
-if (-not $pkgToken) { Bad "No token."; exit 1 }
-
-$pkgToken | docker login ghcr.io -u $user --password-stdin
-$code = $LASTEXITCODE
-$pkgToken = $null; [GC]::Collect()
-if ($code -ne 0) { Bad "docker login failed — the token probably lacks read:packages."; exit 1 }
-Ok "logged in to ghcr.io"
-
-Say ""
-Say "  Proving it. A login that cannot pull is not a login."
+Say "  Checking whether you can already pull it — you may have set this up on an earlier run."
 Say ""
 
-$logFile = [IO.Path]::GetTempFileName()
-$pullOk  = $false
-for ($i = 1; $i -le 3; $i++) {
-    docker pull $IMAGE 2>&1 | Tee-Object -FilePath $logFile
-    if ($LASTEXITCODE -eq 0) { $pullOk = $true; break }
-    $log = Get-Content $logFile -Raw
-    if ($log -imatch 'unauthorized|denied|forbidden') { break }
-    if ($i -lt 3) { Say ""; Say "  transport error — retrying ($i/3)…"; Start-Sleep 3 }
-}
+switch (Try-Pull) {
+    'ok'        { Ok "already authorised — KEY 1 works, skipping the login" }
+    'transport' { Say ""; Show-TransportHelp; exit 1 }
+    'denied'    {
+        Say ""
+        Say "  Not logged in yet. Opening GitHub — the scope is ALREADY selected: read:packages,"
+        Say "  and nothing else. Generate it, copy it, come back."
+        Say ""
+        Start-Process $PKG_URL
 
-if (-not $pullOk) {
-    $log = Get-Content $logFile -Raw
-    Say ""
-    if ($log -imatch 'unauthorized|denied|forbidden') {
-        Bad "Authenticated, but ACCESS was denied."
-        Say "    Your account cannot see the package. Org membership alone does not grant it."
-        Say "    Quote this to whoever invited you:"
-        Say "      '$user authenticates to ghcr.io but is DENIED on $IMAGE.'"
-    } else {
-        Bad "The download failed — and NOT because of permissions."
-        Say ""
-        Say "    You were authorised. The connection dropped mid-layer ('EOF', 'failed to copy')."
-        Say "    Layers do not come from ghcr.io — they come from pkg-containers.githubusercontent.com,"
-        Say "    a DIFFERENT host, and it routes badly from some regions."
-        Say ""
-        Say "    We measured this from Brazil: it fails. Over a VPN to Europe, the identical pull works."
-        Say "    Same machine, same token, same image — only the route changed."
-        Say ""
-        Say "    Prove it in one minute (the first is PUBLIC — no credential at all):"
-        Say "      docker pull ghcr.io/astral-sh/uv:latest"
-        Say "      docker pull python:3.11-slim"
-        Say "    First fails + second works  →  it is the route. TRY A VPN. Ask for no permissions;"
-        Say "                                   you already have the ones you need."
+        $pkgToken = Read-Secret "Paste the token (hidden)"
+        if (-not $pkgToken) { Bad "No token."; exit 1 }
+        $pkgToken | docker login ghcr.io -u $user --password-stdin
+        $code = $LASTEXITCODE
+        $pkgToken = $null; [GC]::Collect()
+        if ($code -ne 0) { Bad "docker login failed — the token probably lacks read:packages."; exit 1 }
+        Ok "logged in to ghcr.io"
+
+        Say ""; Say "  Proving it. A login that cannot pull is not a login."; Say ""
+        switch (Try-Pull) {
+            'ok'        { Ok "the devbox pulled — KEY 1 works" }
+            'transport' { Say ""; Show-TransportHelp; exit 1 }
+            'denied'    {
+                Say ""
+                Bad "Authenticated, but ACCESS was denied."
+                Say "    Your account cannot see the package. Org membership alone does not grant it."
+                Say "    Quote this to whoever invited you:"
+                Say "      '$user authenticates to ghcr.io but is DENIED on $IMAGE.'"
+                exit 1
+            }
+        }
     }
-    exit 1
 }
-Ok "the devbox pulled — KEY 1 works"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  KEY 2 — the engine
@@ -136,13 +149,22 @@ Say "  compiled wheel and the frontend types — and it is scoped to exactly one
 Say "  A key that opens one repo of compiled binaries costs a rotation if it leaks. A broad one"
 Say "  costs the company. That is the whole reason there are two."
 Say ""
-Say "  GitHub does not let us pre-select these, so select them yourself — EXACTLY these:"
-Say ""
-Say "     Resource owner ......  IterSuite          (the ORG — not your username)" -ForegroundColor White
-Say "     Repository access ...  Only select repositories → engine-sdk    (only that one)"
-Say "     Permissions .........  Repository permissions → Contents: Read-only"
-Say ""
-Start-Process $FG_URL
+# The common re-run: you created this token last time and were WAITING FOR APPROVAL. You do not need a
+# new one — the same token flips from 404 to 200 the moment an owner approves it. So ask, and do not send
+# you back to the browser to mint a duplicate you will then have to clean up.
+$have = Read-Host "  Did you already create this token (e.g. you were waiting on approval)? [y/N]"
+if ($have -notmatch '^(y|yes)$') {
+    Say ""
+    Say "  GitHub does not let us pre-select these, so select them yourself — EXACTLY these:"
+    Say ""
+    Say "     Resource owner ......  IterSuite          (the ORG — not your username)" -ForegroundColor White
+    Say "     Repository access ...  Only select repositories → engine-sdk    (only that one)"
+    Say "     Permissions .........  Repository permissions → Contents: Read-only"
+    Say ""
+    Start-Process $FG_URL
+} else {
+    Say "  Good — paste the SAME token. If it was pending, an owner approving it is all that changed."
+}
 
 $sdkToken = Read-Secret "Paste the ENGINE_SDK_TOKEN (hidden)"
 if (-not $sdkToken) { Bad "No token."; exit 1 }
