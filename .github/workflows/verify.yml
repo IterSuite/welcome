@@ -116,65 +116,19 @@ jobs:
           [ "$bad" -eq 0 ] && echo "✓ narrow scope, stdin only, engine plane untouched"
           exit "$bad"
 
-  reality:
-    name: everything this repo names still exists
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+# ── WHY THERE IS NO "does the private stuff still exist" JOB HERE ─────────────
+# It was here. It needed a token — the private repos it checks (start-app, engine-sdk)
+# cannot be read without one — and putting a token in THIS repository is precisely the
+# mistake this platform spent a week deleting.
+#
+# This repo is the most exposed surface we own: PUBLIC by design, the first thing a
+# stranger opens, the one we WANT strangers to read. "Fork PRs do not receive secrets"
+# is true, and it is the right answer to the wrong question. A secret does not belong
+# in the room we built for outsiders. Full stop.
+#
+# So the reality check lives in the TRUSTED repo (omnianvil/platform), which already
+# holds the credentials, which no external developer can push to, and which fails loudly
+# when this document starts lying. The check watches this repo. It does not live in it.
+#
+# See: omnianvil/platform → .github/workflows/verify-welcome.yml
 
-      # This job needs to see PRIVATE IterSuite repos, so it needs a token — and if the token is missing
-      # it must FAIL, not skip. A gate that goes green when its credential is absent is not a gate; it is
-      # a light that is always on. We have shipped that mistake before and will not again.
-      - name: The verify token is present (a gate without its key is not a gate)
-        env:
-          T: ${{ secrets.WELCOME_VERIFY_TOKEN }}
-        run: |
-          if [ -z "${T:-}" ]; then
-            echo "::error::WELCOME_VERIFY_TOKEN is not set. This job cannot check anything, so it FAILS."
-            echo "  It must not pass quietly: a green that proves nothing is worse than a red."
-            echo "  Needs: contents:read on IterSuite/start-app and IterSuite/engine-sdk."
-            exit 1
-          fi
-
-      - name: The template still exists, and is still a template
-        env:
-          GH_TOKEN: ${{ secrets.WELCOME_VERIFY_TOKEN }}
-        run: |
-          set -euo pipefail
-          t="$(gh api repos/IterSuite/start-app -q .is_template)"
-          [ "$t" = "true" ] || {
-            echo "::error::IterSuite/start-app is not a template repository."
-            echo "  The README tells her to create her repo from it with 'Use this template'."
-            echo "  That button does not exist unless this is true."
-            exit 1
-          }
-          echo "✓ start-app is a template"
-
-      - name: The engine still crosses the boundary (wheel + types, on the same release)
-        env:
-          GH_TOKEN: ${{ secrets.WELCOME_VERIFY_TOKEN }}
-        run: |
-          set -euo pipefail
-          assets="$(gh release view --repo IterSuite/engine-sdk --json assets -q '.assets[].name')"
-          echo "$assets" | sed 's/^/    /'
-          echo "$assets" | grep -q 'omnianvil_core-.*\.whl' || {
-            echo "::error::the latest engine-sdk release carries no wheel. Her backend cannot install."; exit 1; }
-          echo "$assets" | grep -q 'omnianvil-types-only.tar.gz' || {
-            echo "::error::the latest engine-sdk release carries no types-only set. Her frontend cannot install"
-            echo "  without a token on the ENGINE registry — which is the door this whole plane closes."; exit 1; }
-          echo "✓ one key, both halves: the wheel and the types ride the same release"
-
-      - name: abcli still publishes a linux binary for both architectures
-        run: |
-          set -euo pipefail
-          # PUBLIC — no token. She downloads this before she has any credential at all.
-          names="$(gh release view --repo omnianvil/abcli --json assets -q '.assets[].name')"
-          for a in abcli-linux-amd64 abcli-linux-arm64; do
-            echo "$names" | grep -qx "$a" || {
-              echo "::error::the latest abcli release has no $a."
-              echo "  She may be on either architecture. A binary for the wrong one does not run at all."
-              exit 1; }
-          done
-          echo "✓ abcli ships amd64 and arm64"
-        env:
-          GH_TOKEN: ${{ github.token }}
