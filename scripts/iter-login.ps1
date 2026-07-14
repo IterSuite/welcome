@@ -109,18 +109,59 @@ Step "Proving it — pulling the devbox image"
 Say "  (This is the only step that matters. Everything above is a claim; this is the evidence.)"
 Say ""
 
-docker pull $IMAGE
-if ($LASTEXITCODE -ne 0) {
+# The image is ~25 layers and a few GB. A truncated blob download is COMMON and has nothing to do with
+# your permissions — so we retry before we blame anything.
+#
+# The first version of this script did not. It treated ANY non-zero exit as "access denied" and printed
+# a confident, specific, WRONG diagnosis — it told a developer whose pull had authenticated fine,
+# fetched the manifest, and pulled 25 layers before hitting `EOF` on a blob, that his account lacked
+# access to the package. He would have gone and asked for permissions he already had, while the real
+# problem — a dropped connection — sat untouched.
+#
+# A wrong diagnosis is worse than no diagnosis. It does not merely fail to help; it sends you somewhere
+# else, confidently, with our name on it. So: read the error before naming a cause.
+$attempts = 3
+$pullOk   = $false
+$log      = ''
+
+for ($i = 1; $i -le $attempts; $i++) {
+    $log = (docker pull $IMAGE 2>&1 | Tee-Object -Variable out | Out-String)
+    if ($LASTEXITCODE -eq 0) { $pullOk = $true; break }
+
+    if ($log -imatch 'unauthorized|denied|forbidden|authentication required') {
+        break    # a permission problem does not get better by trying again
+    }
+    if ($i -lt $attempts) {
+        Say ""
+        Say "  transport error — retrying ($i/$attempts)…"
+        Start-Sleep -Seconds 3
+    }
+}
+
+if (-not $pullOk) {
     Say ""
-    Bad "Authenticated, but the pull was DENIED."
-    Say ""
-    Say "  This is not a token problem — you logged in. It means your account does not have"
-    Say "  access to the package itself."
-    Say ""
-    Say "  Tell whoever invited you, and quote this exactly:"
-    Say ""
-    Say "      '$user is authenticated to ghcr.io but denied on $IMAGE.'"
-    Say "      'The account needs read access to the devbox package, not just org membership.'"
+    if ($log -imatch 'unauthorized|denied|forbidden|authentication required') {
+        Bad "Authenticated, but ACCESS was denied."
+        Say ""
+        Say "  This is not a token problem — the login succeeded. Your account does not have access"
+        Say "  to the package itself. Org membership alone does not grant it."
+        Say ""
+        Say "  Tell whoever invited you, and quote this exactly:"
+        Say ""
+        Say "      '$user is authenticated to ghcr.io but DENIED on $IMAGE.'"
+        Say "      'The account needs read access to the devbox package, not just org membership.'"
+    } else {
+        Bad "The download failed — but NOT because of permissions."
+        Say ""
+        Say "  You were authorised: the manifest was fetched and layers were downloading. The connection"
+        Say "  dropped mid-blob (typically 'EOF' or 'failed to copy'). This is a network problem, and it"
+        Say "  is usually transient."
+        Say ""
+        Say "  Try:  docker pull $IMAGE"
+        Say "  (A corporate proxy or VPN that interferes with large binary downloads is the usual cause.)"
+        Say ""
+        Say "  Do NOT go asking for more permissions. You already have the ones you need — this run proved it."
+    }
     Say ""
     exit 1
 }
