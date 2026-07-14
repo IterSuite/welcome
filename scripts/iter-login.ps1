@@ -123,10 +123,18 @@ Say ""
 $attempts = 3
 $pullOk   = $false
 $log      = ''
+$logFile  = [IO.Path]::GetTempFileName()
 
 for ($i = 1; $i -le $attempts; $i++) {
-    $log = (docker pull $IMAGE 2>&1 | Tee-Object -Variable out | Out-String)
-    if ($LASTEXITCODE -eq 0) { $pullOk = $true; break }
+    # Tee to a FILE, not to a variable: `| Out-String` swallowed the output entirely, so a multi-GB,
+    # 25-layer pull looked frozen and — worse — the real error never reached the screen. I told this
+    # developer to read the error, and then hid it from him. The evidence must stream while it is
+    # captured; a diagnostic that eats its own evidence is not a diagnostic.
+    docker pull $IMAGE 2>&1 | Tee-Object -FilePath $logFile
+    $code = $LASTEXITCODE
+    $log  = Get-Content $logFile -Raw
+
+    if ($code -eq 0) { $pullOk = $true; break }
 
     if ($log -imatch 'unauthorized|denied|forbidden|authentication required') {
         break    # a permission problem does not get better by trying again
@@ -153,14 +161,25 @@ if (-not $pullOk) {
     } else {
         Bad "The download failed — but NOT because of permissions."
         Say ""
-        Say "  You were authorised: the manifest was fetched and layers were downloading. The connection"
-        Say "  dropped mid-blob (typically 'EOF' or 'failed to copy'). This is a network problem, and it"
-        Say "  is usually transient."
+        Say "  You were authorised: the login succeeded and the registry served you the manifest."
+        Say "  The connection then dropped while fetching a layer ('EOF', 'failed to copy')."
         Say ""
-        Say "  Try:  docker pull $IMAGE"
-        Say "  (A corporate proxy or VPN that interferes with large binary downloads is the usual cause.)"
+        Say "  ⚠ Note WHERE it dropped. Layers do not come from ghcr.io — they come from"
+        Say "    pkg-containers.githubusercontent.com, a DIFFERENT host. A corporate proxy, VPN or DLP"
+        Say "    appliance very often allows the first and mangles the second, because one carries JSON"
+        Say "    and the other carries gigabytes of binary. Authentication passing therefore tells you"
+        Say "    nothing about whether the download will."
         Say ""
-        Say "  Do NOT go asking for more permissions. You already have the ones you need — this run proved it."
+        Say "  This is the most likely cause on a managed corporate machine, and it is not something"
+        Say "  more permissions can fix."
+        Say ""
+        Say "  Try, in order:"
+        Say "    1. docker pull $IMAGE          (transient drops are common; it often just works)"
+        Say "    2. off the corporate network / VPN — if it works there, you have your answer"
+        Say "    3. ask IT to allow pkg-containers.githubusercontent.com"
+        Say ""
+        Say "  Do NOT go asking for more permissions. You already have the ones you need — this run"
+        Say "  proved it: you authenticated, and the registry answered."
     }
     Say ""
     exit 1
