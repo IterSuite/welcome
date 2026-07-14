@@ -64,26 +64,45 @@ we deliberately did not merge them.
 > hand you one broad token that opens both. It would work perfectly, and it would quietly undo the thing
 > this whole arrangement exists to protect. See [ADR-106](#).
 
-### 2.1 — The image key (scripted)
+### One script, both keys
 
 ```powershell
 # Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/IterSuite/welcome/v1/scripts/iter-login.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/IterSuite/welcome/v1/scripts/iter-setup.ps1 | iex
 ```
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/IterSuite/welcome/v1/scripts/iter-login.sh | bash
+curl -fsSL https://raw.githubusercontent.com/IterSuite/welcome/v1/scripts/iter-setup.sh | bash
 ```
 
-> **Read the script before you run it.** It is about a hundred lines, in this repository, and we mean
-> this literally: piping a remote script into your shell is the exact shape of a supply-chain attack.
-> We use the pattern because it is the least-bad onboarding path, and we pin the URL to a tag so it
-> cannot change under you. **You should still look.** If we ever teach you not to, we have taught you
-> the vector.
+It walks both keys, **verifies each one instead of assuming it**, and then launches VS Code with the
+engine token already in its environment — so the container inherits it and you never have to do the
+"quit VS Code and relaunch it from the right shell" dance.
+
+> **It checks the engine token against the API before letting you go any further**, and that check is
+> the reason this script exists. A fine-grained token that is still **pending approval** is a *valid*
+> token that can see **nothing** — and GitHub reports that as **"not found"**, never as "not yours". The
+> script asks GitHub directly and tells you which one you have. That single question is worth the whole
+> afternoon it otherwise costs.
+
+> **Read the script before you run it.** It is a couple of hundred lines, in this repository, and we mean
+> this literally: piping a remote script into your shell is the exact shape of a supply-chain attack. We
+> use the pattern because it is the least-bad onboarding path, and we pin the URL to a tag so it cannot
+> change under you. **You should still look.** If we ever teach you not to, we have taught you the vector.
 >
-> **It installs nothing.** It opens a browser, takes a token you paste into a hidden prompt, and hands
-> it to Docker. That is all it does.
+> **It installs nothing.** No Docker, no `gh`, nothing. Your host stays yours.
+
+If you would rather do it by hand, the next two sections are exactly what the script does.
+
+### 2.1 — The image key, by hand
+
+Open <https://github.com/settings/tokens/new?scopes=read:packages> — *the scope is pre-selected* — then:
+
+```bash
+docker login ghcr.io -u <your-github-username>     # paste at the HIDDEN prompt
+docker pull ghcr.io/itersuite/devbox:latest        # a login that cannot pull is not a login
+```
 
 ### 2.2 — The engine key (by hand, and it stays that way)
 
