@@ -155,9 +155,39 @@ Almost every failure here is one of four things, and each disguises itself as so
 | what you see | what it almost always is |
 |---|---|
 | `unauthorized` pulling the image | **Step 2.1** — no `read:packages` credential |
+| **`failed to copy: httpReadSeeker … EOF`** | **your network, not your permissions.** See below — and do **not** go asking for access you already have |
 | a `404` / *"could not resolve to a repository"* | **Step 2.2** — the token is **pending approval**, and sees nothing |
 | the token is missing *inside* the container | VS Code was **already running** when you set the variable |
 | a tool behaving like an older version | your Docker has a **cached image**. `docker pull` does not happen by itself, and `--no-cache` does not do it either |
+
+### The `EOF` one, because it lies to you
+
+If the pull **authenticates**, lists layers, and then dies with
+`failed to copy: httpReadSeeker: … EOF`, **your credentials are fine.** You got that far *because* they
+worked.
+
+**Container layers do not come from `ghcr.io`.** They come from
+**`pkg-containers.githubusercontent.com`** — a different host. Plenty of corporate networks, VPNs and DLP
+appliances allow the first and mangle the second: one carries a little JSON, the other carries gigabytes
+of binary. So **authentication succeeding tells you nothing about whether the download will**, and the
+error message never mentions any of this. It just says `EOF`.
+
+**Two commands settle it in a minute.** Do this before you ask anyone for anything:
+
+```bash
+docker pull ghcr.io/astral-sh/uv:latest   # PUBLIC. No token involved, at all.
+docker pull python:3.11-slim              # a different CDN entirely
+```
+
+| | |
+|---|---|
+| **the first fails, the second works** | your network is blocking the GitHub blob CDN. **Nothing about your access is wrong**, and no permission can fix it. **Try a VPN**, or ask IT to allow `pkg-containers.githubusercontent.com`. |
+| both fail | your network is mangling large binary downloads in general. Same conversation with IT, wider scope. |
+| both work | then it *is* ours. Tell us — that is a real bug and we want it. |
+
+*(This is measured, not guessed: it is exactly what happened to us on a managed corporate laptop. The
+public `uv` image — two layers, no credential — failed identically. That is what proves it is the road,
+not the cargo.)*
 
 If it is none of those, it is ours. **`abcli feedback new`** — from inside the container — files it with
 the evidence, and it reaches the people who can fix it. **Do not work around it silently.** A wall you

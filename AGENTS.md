@@ -146,9 +146,38 @@ Four failures cover nearly everything, and each one disguises itself:
 | what you see | what it is |
 |---|---|
 | `unauthorized` on the image pull | Step 2 — no `read:packages` credential |
+| **`failed to copy: httpReadSeeker … EOF`** | **the network, NOT permissions.** Read the next section before you act. |
 | `404` / *"could not resolve to a repository"* | Step 3 — the token is **pending approval** |
 | the token is missing *inside* the container | VS Code was already running when the variable was set |
 | a tool behaves like an older version of itself | **a cached image.** Docker does not re-pull a tag it already has, and `--no-cache` rebuilds *layers on top of* the base — it never re-fetches the base. `docker pull` explicitly, or delete the image. |
+
+### `EOF` on the pull — do not misdiagnose this. We already did.
+
+A pull that **authenticates**, lists its layers, and *then* dies with `failed to copy: httpReadSeeker …
+EOF` is **not** a permission failure. It got that far *because* the credentials worked.
+
+**Layers do not come from `ghcr.io`.** They come from **`pkg-containers.githubusercontent.com`** — a
+different host. Corporate networks, VPNs and DLP appliances routinely allow the first and mangle the
+second: one carries a little JSON, the other carries gigabytes of binary. **Authentication succeeding
+therefore tells you nothing about whether the download will**, and the error says none of this. It says
+`EOF`.
+
+**Measure it. Do not guess, and do not send your human to ask for access they already have** — the first
+version of our own bootstrap script did exactly that, and it was wrong:
+
+```bash
+docker pull ghcr.io/astral-sh/uv:latest   # PUBLIC image. No credential involved at all.
+docker pull python:3.11-slim              # a different CDN entirely
+```
+
+- **First fails, second works** → the network is blocking the GitHub blob CDN. **Nothing about their
+  access is wrong and no permission can fix it.** Suggest a VPN, or ask IT to allow
+  `pkg-containers.githubusercontent.com`.
+- **Both fail** → the network mangles large binary downloads generally.
+- **Both work** → then it really is ours. **File it** — that is a bug we want.
+
+*(This is measured, not theorised. On a managed corporate laptop the public `uv` image — two layers, no
+credential — failed identically. That is what proves it is the road, not the cargo.)*
 
 Anything else is **ours**, not theirs. From inside the container: **`abcli feedback new`**. Paste the
 evidence — the failing command, the traceback, the path. Do not classify it; the routing is derived from
