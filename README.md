@@ -167,10 +167,12 @@ If the pull **authenticates**, lists layers, and then dies with
 worked.
 
 **Container layers do not come from `ghcr.io`.** They come from
-**`pkg-containers.githubusercontent.com`** — a different host. Plenty of corporate networks, VPNs and DLP
-appliances allow the first and mangle the second: one carries a little JSON, the other carries gigabytes
-of binary. So **authentication succeeding tells you nothing about whether the download will**, and the
-error message never mentions any of this. It just says `EOF`.
+**`pkg-containers.githubusercontent.com`** — a different host. That host **routes badly from some parts of the world**, and a
+corporate proxy or DLP appliance can mangle it too. Either way: **authentication succeeding tells you
+nothing about whether the download will**, and the error mentions none of it. It just says `EOF`.
+
+**We measured this from Brazil: the blob CDN fails. Over a VPN to Europe, the same pull works.** Same
+machine, same credential, same image — only the route changed.
 
 **Two commands settle it in a minute.** Do this before you ask anyone for anything:
 
@@ -181,13 +183,12 @@ docker pull python:3.11-slim              # a different CDN entirely
 
 | | |
 |---|---|
-| **the first fails, the second works** | your network is blocking the GitHub blob CDN. **Nothing about your access is wrong**, and no permission can fix it. **Try a VPN**, or ask IT to allow `pkg-containers.githubusercontent.com`. |
+| **the first fails, the second works** | you cannot reach the GitHub blob CDN. **Nothing about your access is wrong**, and no permission can fix it. **Try a VPN to another region — this is the one that usually works**, and it is what we hit from Brazil. If a VPN is not an option, ask IT to allow `pkg-containers.githubusercontent.com`. |
 | both fail | your network is mangling large binary downloads in general. Same conversation with IT, wider scope. |
 | both work | then it *is* ours. Tell us — that is a real bug and we want it. |
 
-*(This is measured, not guessed: it is exactly what happened to us on a managed corporate laptop. The
-public `uv` image — two layers, no credential — failed identically. That is what proves it is the road,
-not the cargo.)*
+*(Measured, not guessed. The public `uv` image — two layers, no credential, nothing of ours — failed
+identically, while Docker Hub pulled clean. That is what proves it is the **road**, not the **cargo**.)*
 
 If it is none of those, it is ours. **`abcli feedback new`** — from inside the container — files it with
 the evidence, and it reaches the people who can fix it. **Do not work around it silently.** A wall you

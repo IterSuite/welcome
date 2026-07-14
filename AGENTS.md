@@ -157,10 +157,13 @@ A pull that **authenticates**, lists its layers, and *then* dies with `failed to
 EOF` is **not** a permission failure. It got that far *because* the credentials worked.
 
 **Layers do not come from `ghcr.io`.** They come from **`pkg-containers.githubusercontent.com`** — a
-different host. Corporate networks, VPNs and DLP appliances routinely allow the first and mangle the
-second: one carries a little JSON, the other carries gigabytes of binary. **Authentication succeeding
-therefore tells you nothing about whether the download will**, and the error says none of this. It says
-`EOF`.
+different host. That host **routes badly from some regions**, and a corporate proxy or DLP can mangle it
+too. **Authentication succeeding therefore tells you nothing about whether the download will**, and the
+error says none of this. It says `EOF`.
+
+**Measured: from Brazil the blob CDN fails; over a VPN to Europe the identical pull succeeds.** Same
+machine, same credential, same image. Only the route changed. **If your human is in Latin America, try
+the VPN FIRST** — it is the fastest thing to rule in, and it is not their fault.
 
 **Measure it. Do not guess, and do not send your human to ask for access they already have** — the first
 version of our own bootstrap script did exactly that, and it was wrong:
@@ -170,9 +173,9 @@ docker pull ghcr.io/astral-sh/uv:latest   # PUBLIC image. No credential involved
 docker pull python:3.11-slim              # a different CDN entirely
 ```
 
-- **First fails, second works** → the network is blocking the GitHub blob CDN. **Nothing about their
-  access is wrong and no permission can fix it.** Suggest a VPN, or ask IT to allow
-  `pkg-containers.githubusercontent.com`.
+- **First fails, second works** → they cannot reach the GitHub blob CDN. **Nothing about their access is
+  wrong and no permission can fix it.** **Suggest a VPN to another region first** — that is what worked
+  for us from Brazil. Failing that, ask IT to allow `pkg-containers.githubusercontent.com`.
 - **Both fail** → the network mangles large binary downloads generally.
 - **Both work** → then it really is ours. **File it** — that is a bug we want.
 
