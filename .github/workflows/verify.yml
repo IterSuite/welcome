@@ -1,0 +1,180 @@
+name: verify — the welcome must not lie
+
+# A document is a claim about the world, and the world moves.
+#
+# This repository is the FIRST thing an external developer reads, and it is the ONE document she cannot
+# check against anything: she has no source, no history, and no idea what we changed this morning. She
+# can only obey. That is not a hypothetical — we watched an agent read a runbook that had gone stale in
+# under an hour and repeat its mistake back to us with total confidence.
+#
+# So this doc gets a falsifier. It runs on every push, and weekly, and it FAILS when reality moves.
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 6 * * *'   # daily. The world moves faster than a week.
+  workflow_dispatch:
+
+jobs:
+  no-versions:
+    name: the docs name no versions (they cannot rot if they cannot rot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # THE STRUCTURAL INVARIANT, and the whole reason this job exists first.
+      #
+      # We pinned `abcli 0.5.13` in a runbook and it was stale within the hour — 0.5.14 shipped while we
+      # were still talking about it. The fix is not "remember to update the doc". Nobody remembers. The
+      # fix is that THIS DOCUMENT DOES NOT GET TO NAME A VERSION.
+      #
+      # Versions live where they are PINNED and where a machine enforces them:
+      #   • abcli      → .abcli.lock       (in the app repo)
+      #   • the plan   → .abcli-plan.lock  (in the app repo)
+      #   • the devbox → the digest in devcontainer.json (in the app repo)
+      #   • the engine → uv.lock           (in the app repo)
+      #
+      # Float at acquisition, pin at use. A doc that names no version cannot lie about one.
+      - name: No version numbers or digests in the prose
+        run: |
+          set -euo pipefail
+          bad=0
+          for f in README.md AGENTS.md; do
+            # semver-ish (v0.5.13, 1.2.3) and image digests
+            if grep -nE '\bv?[0-9]+\.[0-9]+\.[0-9]+\b|sha256:[a-f0-9]{16,}' "$f" \
+                 | grep -vE '^\s*[0-9]+:.*(ADR-|#)' ; then
+              echo "::error file=$f::this document names a version. It will be wrong, and she cannot tell."
+              echo "  Versions belong in a lockfile a machine enforces — not in prose a human forgets."
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] && echo "✓ the prose names no version — it has nothing to go stale about"
+          exit "$bad"
+
+  scripts:
+    name: the bootstrap scripts are sound
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck scripts/iter-login.sh
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $r = Invoke-ScriptAnalyzer -Path scripts/iter-login.ps1 -Severity Error,Warning
+          if ($r) { $r | Format-Table; exit 1 }
+          Write-Host "✓ clean"
+
+      # The script must never widen a credential (ADR-106). This is cheap, and it is the one mistake
+      # that would pass every functional test we could write — because the wider token WORKS.
+      - name: The scripts never touch the engine credential, and never ask for a wide scope
+        run: |
+          set -euo pipefail
+          bad=0
+
+          # Look for USE, not MENTION. The scripts talk about ENGINE_SDK_TOKEN at length — to say they
+          # do not touch it — and a gate that fails a script for EXPLAINING the rule it obeys is the
+          # same false alarm we have chased all week. A red that is wrong teaches everyone to ignore red.
+          #
+          # So: strip comments, then look for an assignment or an expansion. That is the difference
+          # between a script that names the boundary and a script that crosses it.
+          # Strips `# line comments` AND PowerShell's `<# block #>`. Written in awk because the obvious
+          # sed one-liner was WRONG and PASSED: its delimiter collided with a pipe inside the pattern,
+          # sed errored, the .ps1 never reached the check — and the job went GREEN while inspecting half
+          # the scripts. It was caught by breaking the gate on purpose, which is the only reason it is
+          # not still broken. A guard you have not falsified is a guard you are only hoping for.
+          strip_comments() {
+            awk '
+              /<#/            { inblock = 1 }
+              inblock         { if (/#>/) inblock = 0; next }
+                              { sub(/^[[:space:]]*#.*$/, ""); print }
+            ' "$1"
+          }
+          code="$(mktemp)"
+          strip_comments scripts/iter-login.sh  >  "$code"
+          strip_comments scripts/iter-login.ps1 >> "$code"
+
+          if grep -nE 'ENGINE_SDK_TOKEN[[:space:]]*=|\$\{?ENGINE_SDK_TOKEN|\$env:ENGINE_SDK_TOKEN' "$code"; then
+            echo "::error::a bootstrap script USES ENGINE_SDK_TOKEN."
+            echo "  The image key and the engine key are two doors (ADR-106). Automation may ACQUIRE a"
+            echo "  credential; it may never WIDEN one. A token that opens both is the boundary, gone."
+            bad=1
+          fi
+          if grep -nE 'scopes=[^&"'"'"']*\b(repo|write|admin|delete)' scripts/*; then
+            echo "::error::a bootstrap script requested a scope wider than read:packages."
+            bad=1
+          fi
+          # the token must never reach the command line or the disk
+          if grep -nE 'docker login[^|]*-p |--password [^s]' scripts/*; then
+            echo "::error::a token on the command line lands in shell history, forever. Use --password-stdin."
+            bad=1
+          fi
+          [ "$bad" -eq 0 ] && echo "✓ narrow scope, stdin only, engine plane untouched"
+          exit "$bad"
+
+  reality:
+    name: everything this repo names still exists
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This job needs to see PRIVATE IterSuite repos, so it needs a token — and if the token is missing
+      # it must FAIL, not skip. A gate that goes green when its credential is absent is not a gate; it is
+      # a light that is always on. We have shipped that mistake before and will not again.
+      - name: The verify token is present (a gate without its key is not a gate)
+        env:
+          T: ${{ secrets.WELCOME_VERIFY_TOKEN }}
+        run: |
+          if [ -z "${T:-}" ]; then
+            echo "::error::WELCOME_VERIFY_TOKEN is not set. This job cannot check anything, so it FAILS."
+            echo "  It must not pass quietly: a green that proves nothing is worse than a red."
+            echo "  Needs: contents:read on IterSuite/start-app and IterSuite/engine-sdk."
+            exit 1
+          fi
+
+      - name: The template still exists, and is still a template
+        env:
+          GH_TOKEN: ${{ secrets.WELCOME_VERIFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          t="$(gh api repos/IterSuite/start-app -q .is_template)"
+          [ "$t" = "true" ] || {
+            echo "::error::IterSuite/start-app is not a template repository."
+            echo "  The README tells her to create her repo from it with 'Use this template'."
+            echo "  That button does not exist unless this is true."
+            exit 1
+          }
+          echo "✓ start-app is a template"
+
+      - name: The engine still crosses the boundary (wheel + types, on the same release)
+        env:
+          GH_TOKEN: ${{ secrets.WELCOME_VERIFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view --repo IterSuite/engine-sdk --json assets -q '.assets[].name')"
+          echo "$assets" | sed 's/^/    /'
+          echo "$assets" | grep -q 'omnianvil_core-.*\.whl' || {
+            echo "::error::the latest engine-sdk release carries no wheel. Her backend cannot install."; exit 1; }
+          echo "$assets" | grep -q 'omnianvil-types-only.tar.gz' || {
+            echo "::error::the latest engine-sdk release carries no types-only set. Her frontend cannot install"
+            echo "  without a token on the ENGINE registry — which is the door this whole plane closes."; exit 1; }
+          echo "✓ one key, both halves: the wheel and the types ride the same release"
+
+      - name: abcli still publishes a linux binary for both architectures
+        run: |
+          set -euo pipefail
+          # PUBLIC — no token. She downloads this before she has any credential at all.
+          names="$(gh release view --repo omnianvil/abcli --json assets -q '.assets[].name')"
+          for a in abcli-linux-amd64 abcli-linux-arm64; do
+            echo "$names" | grep -qx "$a" || {
+              echo "::error::the latest abcli release has no $a."
+              echo "  She may be on either architecture. A binary for the wrong one does not run at all."
+              exit 1; }
+          done
+          echo "✓ abcli ships amd64 and arm64"
+        env:
+          GH_TOKEN: ${{ github.token }}
