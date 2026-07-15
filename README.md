@@ -14,20 +14,19 @@ minutes.
 
 ---
 
-## What you are getting, and what you will never see
+## What you build against, and what you never see
 
 You build **against artifacts, never against the platform's source.**
 
 | you receive | you never receive |
 |---|---|
 | the **devbox** — a container image with the platform **compiled** inside it | the platform's source code |
-| the **engine wheel** — the backend, as a compiled binary (`.so`) | the engine's Python |
+| the **engine wheel** — the backend, as a compiled binary | the backend source |
 | the **types** — TypeScript declarations for the frontend packages | the frontend implementation |
 | **`abcli`** — the developer CLI, one compiled binary | its source |
 
-This is not a trust problem, and it is not a limitation of your role. It is the arrangement that lets a
-third party build on a platform whose engine is its owner's core IP. **You compile against all of it and
-can read none of it**, and everything you need to do your job crosses that line as a built artifact.
+**You compile against all of it and read none of it.** Everything you need to do your job crosses to you as
+a built artifact.
 
 If something you need is not on the public surface, that is a **request** (`abcli feedback new`) — not a
 reason to reach for internals. **They are not present.** There is nothing to reach for.
@@ -59,10 +58,10 @@ we deliberately did not merge them.
 | **1** | a token with **`read:packages`** | **pulling the devbox image** from GHCR | the script below, or by hand |
 | **2** | **`ENGINE_SDK_TOKEN`** — fine-grained, **`contents:read`**, on **`IterSuite/engine-sdk`** and nothing else | **the engine wheel + the frontend types** | you create it; an org owner approves it |
 
-> **Why two?** Because the second one **is** the boundary. A key that opens exactly one repository of
-> compiled binaries is a key that, if it ever leaks, costs a rotation instead of a company. We could
-> hand you one broad token that opens both. It would work perfectly, and it would quietly undo the thing
-> this whole arrangement exists to protect. See [ADR-106](#).
+> **Why two?** They open two different doors — one pulls the image, one fetches the engine artifacts — and
+> keeping them separate means the narrow one, scoped to a single repository, is all that is ever exposed. A
+> single broad token would work for both; we deliberately don't use one. Keep each key to the one door it
+> opens.
 
 ### One script, both keys
 

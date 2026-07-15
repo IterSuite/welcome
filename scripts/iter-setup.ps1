@@ -20,7 +20,7 @@
 
     WHAT IT NEVER DOES
       • Writes a token to disk, to your registry (no `setx`), or to your shell history.
-      • Merges the two keys. They open two different doors and are deliberately separate (ADR-106).
+      • Merges the two keys. They open two different doors and are deliberately separate.
         A single broad token would work for both — and that is exactly why it is forbidden. Automation
         may ACQUIRE a credential; it may never WIDEN one.
 #>

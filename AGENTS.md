@@ -31,8 +31,7 @@ Everything below works with **Docker Desktop and a browser**. Nothing else is re
 
 **Do not create, request, or handle a broad token.** There are exactly two credentials (below) and they
 are deliberately separate. If you find yourself thinking *"we already have a token that would work for
-this too"* — **stop.** That thought is the failure mode this platform is designed against, and it is
-written up as ADR-106. A token that works for two planes is not convenient; it is the boundary, gone.
+this too"* — **stop.** Keep each credential scoped to the one door it opens; never widen or merge them.
 
 ---
 
@@ -132,8 +131,7 @@ find /opt/iter -name '*.py' | wc -l                        # must be 0
 
 Expect: token present · a docker server version · `nuitka_module_loader` · **`0`**.
 
-That last line is the boundary reporting itself. If it is not `0`, something is very wrong and it is
-ours — file it.
+If that last count is not `0`, something is very wrong and it is ours — file it.
 
 **Then stop.** The app repo's own `AGENTS.md` owns everything from here. Read it, and follow it there.
 
