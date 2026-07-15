@@ -65,7 +65,10 @@ jobs:
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
-          $r = Invoke-ScriptAnalyzer -Path scripts/iter-setup.ps1 -Severity Error,Warning
+          # -Settings applies PSScriptAnalyzerSettings.psd1 — the two rules it excludes
+          # (Write-Host in an interactive installer; BOM on an `iwr | iex`-delivered file)
+          # are documented there, on the record.
+          $r = Invoke-ScriptAnalyzer -Path scripts/iter-setup.ps1 -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error,Warning
           if ($r) { $r | Format-Table; exit 1 }
           Write-Host "✓ clean"
 
