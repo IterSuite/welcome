@@ -72,7 +72,7 @@ jobs:
           if ($r) { $r | Format-Table; exit 1 }
           Write-Host "✓ clean"
 
-      # The script must never widen a credential (ADR-106). This is cheap, and it is the one mistake
+      # The script must never widen a credential. This is cheap, and it is the one mistake
       # that would pass every functional test we could write — because the wider token WORKS.
       - name: The scripts never touch the engine credential, and never ask for a wide scope
         run: |
@@ -107,13 +107,13 @@ jobs:
           # (the properly scoped one) and hands it to VS Code, which is exactly what it should do. A guard
           # that fails correct code is not strict — it is imprecise, and imprecise guards get switched off.
           #
-          # What ADR-106 actually forbids is REUSE: assigning the image key (or a gh OAuth token, which
+          # What must never happen is REUSE: assigning the image key (or a gh OAuth token, which
           # carries scope `repo`) into ENGINE_SDK_TOKEN. That is the one-line change that would work
-          # perfectly, pass every functional test, and delete the boundary.
+          # perfectly, pass every functional test, and quietly merge the two keys into one.
           if grep -nE 'ENGINE_SDK_TOKEN[[:space:]]*=[[:space:]]*.*(PKG_TOKEN|pkgToken|gh auth token|GH_TOKEN|GITHUB_TOKEN)' "$code"; then
             echo "::error::a bootstrap script assigns the IMAGE key (or a gh token) into ENGINE_SDK_TOKEN."
-            echo "  Two doors, two keys (ADR-106). Automation may ACQUIRE a credential; it may never WIDEN"
-            echo "  one. A token that opens both planes is the boundary, gone — and it would work perfectly,"
+            echo "  Two doors, two keys. Automation may ACQUIRE a credential; it may never WIDEN"
+            echo "  one. A token that opens both planes merges the two keys — and it would work perfectly,"
             echo "  which is precisely why it is forbidden."
             bad=1
           fi
@@ -145,9 +145,7 @@ jobs:
 # is true, and it is the right answer to the wrong question. A secret does not belong
 # in the room we built for outsiders. Full stop.
 #
-# So the reality check lives in the TRUSTED repo (omnianvil/platform), which already
-# holds the credentials, which no external developer can push to, and which fails loudly
-# when this document starts lying. The check watches this repo. It does not live in it.
-#
-# See: omnianvil/platform → .github/workflows/verify-welcome.yml
+# So the reality check lives in a trusted internal repo, which already holds the
+# credentials, which no external developer can push to, and which fails loudly when this
+# document starts lying. The check watches this repo. It does not live in it.
 
