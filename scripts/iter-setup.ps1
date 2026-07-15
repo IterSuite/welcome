@@ -49,7 +49,7 @@ function Read-Secret($prompt) {
 # resume from. But stateless is not the same as oblivious: instead of REMEMBERING what is done, it
 # MEASURES it. Try the pull first; if it already works, the whole credential dance is skipped. Returns
 # 'ok' | 'denied' | 'transport' so the caller can tell "you lack access" from "your network dropped".
-function Try-Pull {
+function Invoke-Pull {
     $log = [IO.Path]::GetTempFileName()
     for ($i = 1; $i -le 3; $i++) {
         docker pull $IMAGE 2>&1 | Tee-Object -FilePath $log
@@ -106,7 +106,7 @@ Step "KEY 1 of 2 — the devbox image (read:packages)"
 Say "  Checking whether you can already pull it — you may have set this up on an earlier run."
 Say ""
 
-switch (Try-Pull) {
+switch (Invoke-Pull) {
     'ok'        { Ok "already authorised — KEY 1 works, skipping the login" }
     'transport' { Say ""; Show-TransportHelp; exit 1 }
     'denied'    {
@@ -125,7 +125,7 @@ switch (Try-Pull) {
         Ok "logged in to ghcr.io"
 
         Say ""; Say "  Proving it. A login that cannot pull is not a login."; Say ""
-        switch (Try-Pull) {
+        switch (Invoke-Pull) {
             'ok'        { Ok "the devbox pulled — KEY 1 works" }
             'transport' { Say ""; Show-TransportHelp; exit 1 }
             'denied'    {
